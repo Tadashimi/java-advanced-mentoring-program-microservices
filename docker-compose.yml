@@ -1,0 +1,119 @@
+version: "3.9"
+volumes:
+  prometheus-data: { }
+  grafana-data: { }
+networks:
+  recipient:
+    external:
+      name: recipient
+  sender:
+    external:
+      name: sender
+services:
+  micro-collector:
+    build: ./micro-collector
+    ports:
+      - 8081:8080
+    networks:
+      - recipient
+    environment:
+      - spring_rabbitmq_host=rabbitmq
+      - spring_rabbitmq_port=5672
+      - spring_rabbitmq_username=rabbitmq
+      - spring_rabbitmq_password=rabbitmq
+      - spring.datasource.url=jdbc:postgresql://postgres:5438/postgres
+      - spring.datasource.username=postgres
+      - spring.datasource.password=postgres
+    depends_on:
+        - rabbitmq
+        - postgres
+  micro-recipient:
+    build: ./micro-recipient
+    ports:
+      - 8082:8080
+    networks:
+      - recipient
+    environment:
+      - spring_rabbitmq_host=rabbitmq
+      - spring_rabbitmq_port=5672
+      - spring_rabbitmq_username=rabbitmq
+      - spring_rabbitmq_password=rabbitmq
+    depends_on:
+      - rabbitmq
+  micro-sender:
+    build: ./micro-sender
+    ports:
+      - 8083:8080
+    networks:
+      - sender
+    environment:
+      - spring_rabbitmq_host=rabbitmq
+      - spring_rabbitmq_port=5672
+      - spring_rabbitmq_username=rabbitmq
+      - spring_rabbitmq_password=rabbitmq
+    depends_on:
+      - rabbitmq
+  micro-visualizer:
+    build: ./micro-visualizer
+    ports:
+      - 8084:8080
+    networks:
+      - sender
+      - recipient
+    environment:
+      - spring.datasource.url=jdbc:postgresql://postgres:5438/postgres
+      - spring.datasource.username=postgres
+      - spring.datasource.password=postgres
+    depends_on:
+      - postgres
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    hostname: rabbitmq
+    ports:
+      - 15672:15672
+      - 5672:5672
+    networks:
+      - sender
+      - recipient
+    environment:
+      RABBITMQ_DEFAULT_USER: "rabbitmq"
+      RABBITMQ_DEFAULT_PASS: "rabbitmq"
+  grafana:
+    image: grafana/grafana
+    user: "472"
+    depends_on:
+      - prometheus
+    ports:
+      - 3000:3000
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - grafana-data:/var/lib/grafana
+    networks:
+      - sender
+      - recipient
+    restart: always
+  prometheus:
+    image: prom/prometheus:v2.21.0
+    ports:
+      - 9000:9090
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    command: --web.enable-lifecycle  --config.file=/etc/prometheus/prometheus.yml
+  postgres:
+    image: postgres:10.5
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+    logging:
+      options:
+        max-size: 10m
+        max-file: "3"
+    ports:
+      - '5438:5432'
+    volumes:
+#      - ./postgres-data:/var/lib/postgresql/data
+      # copy the sql script to create tables
+      - ./sql/create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql
